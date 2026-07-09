@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>電卓</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "Hiragino Sans", sans-serif;
+  }
+  .calc {
+    width: 100%;
+    max-width: 390px;
+    height: 100%;
+    max-height: 844px;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 14px 22px;
+    user-select: none;
+  }
+  /* ---- 上部バー ---- */
+  .topbar {
+    display: flex;
+    justify-content: flex-start;
+    padding: 4px 6px;
+  }
+  .topbar .menu {
+    color: #ff9f0a;
+    font-size: 22px;
+    line-height: 1;
+    cursor: default;
+  }
+  .spacer { flex: 1 1 auto; }
+  /* ---- 入力中の式（iOS18風・メイン表示の上） ---- */
+  .expr {
+    display: flex;
+    justify-content: flex-end;
+    align-items: flex-end;
+    overflow: hidden;
+    min-height: 42px;
+    padding: 0 8px;
+    color: #98989d;
+    font-size: 30px;
+    font-weight: 400;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+  }
+  /* ---- メイン表示（ライブ結果） ---- */
+  .display {
+    color: #fff;
+    text-align: right;
+    font-size: 82px;
+    font-weight: 300;
+    padding: 0 6px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    line-height: 1.15;
+    min-height: 100px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+  }
+  .rad {
+    color: #d1d1d6;
+    font-size: 15px;
+    padding: 0 8px 8px;
+    height: 28px;
+  }
+  /* ---- キーパッド ---- */
+  .keys {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .key {
+    aspect-ratio: 1;
+    border: none;
+    border-radius: 50%;
+    font-size: 32px;
+    font-weight: 400;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: filter 0.15s;
+    font-family: inherit;
+  }
+  .key:active { filter: brightness(1.6); }
+  .key.num { background: #333333; color: #fff; }
+  .key.fn  { background: #a5a5a5; color: #000; font-size: 28px; }
+  .key.op  { background: #ff9f0a; color: #fff; font-size: 38px; font-weight: 500; }
+  .key.op.active { background: #fff; color: #ff9f0a; }
+  .key.icon svg { width: 30px; height: 30px; }
+</style>
+</head>
+<body>
+  <div class="calc">
+    <div class="topbar"><span class="menu">&#x2630;</span></div>
+    <div class="spacer"></div>
+    <div class="expr" id="expr"></div>
+    <div class="display" id="display">0</div>
+    <div class="rad">Rad</div>
+    <div class="keys">
+      <button class="key fn"  data-key="ac"  id="acBtn">AC</button>
+      <button class="key fn"  data-key="pm">⁺⁄₋</button>
+      <button class="key fn"  data-key="pct">%</button>
+      <button class="key op"  data-key="÷">÷</button>
+      <button class="key num" data-key="7">7</button>
+      <button class="key num" data-key="8">8</button>
+      <button class="key num" data-key="9">9</button>
+      <button class="key op"  data-key="×">×</button>
+      <button class="key num" data-key="4">4</button>
+      <button class="key num" data-key="5">5</button>
+      <button class="key num" data-key="6">6</button>
+      <button class="key op"  data-key="−">−</button>
+      <button class="key num" data-key="1">1</button>
+      <button class="key num" data-key="2">2</button>
+      <button class="key num" data-key="3">3</button>
+      <button class="key op"  data-key="+">+</button>
+      <button class="key num icon" data-key="none" aria-label="電卓切替">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round">
+          <rect x="5.5" y="3" width="13" height="18" rx="3"/>
+          <line x1="8.5" y1="7" x2="15.5" y2="7"/>
+          <circle cx="9" cy="11.5" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="12" cy="11.5" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="15" cy="11.5" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="9" cy="15" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="12" cy="15" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="15" cy="15" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="9" cy="18.2" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="12" cy="18.2" r="0.9" fill="#fff" stroke="none"/>
+          <circle cx="15" cy="18.2" r="0.9" fill="#fff" stroke="none"/>
+        </svg>
+      </button>
+      <button class="key num" data-key="0">0</button>
+      <button class="key num" data-key=".">.</button>
+      <button class="key op"  data-key="=">=</button>
+    </div>
+  </div>
+
+<script>
+(function(){
+  'use strict';
+
+  // ===== 状態 =====
+  let acc = null;        // 累積結果
+  let op = null;         // 保留中の演算子
+  let cur = '0';         // 入力中の数値（文字列）
+  let typing = false;    // 数値入力中か
+  let committed = 0;     // 確定した数値の個数
+  let parts = [];        // 入力中の式パーツ（数値と演算子）
+  let justEval = false;  // 直前に = を押したか
+  let lastExpr = '';     // = 直後に上段へ残す式
+  let forced = null;     // マジック用 { digits, idx }
+
+  const MAGIC_AT = 4;    // この個数の数値が確定したら次（5個目）を強制入力にする
+  const displayEl = document.getElementById('display');
+  const exprEl = document.getElementById('expr');
+  const acBtn = document.getElementById('acBtn');
+
+  // ===== ターゲット：今日の日付＋今の時間 (YYMMDDHHmm) =====
+  function nowTarget(){
+    const d = new Date();
+    const p = n => String(n).padStart(2, '0');
+    return Number(
+      p(d.getFullYear() % 100) + p(d.getMonth() + 1) + p(d.getDate()) +
+      p(d.getHours()) + p(d.getMinutes())
+    );
+  }
+
+  // ===== 表示整形 =====
+  function fmt(s){
+    if (s === '' || s == null) return '0';
+    let str = String(s);
+    const neg = str.startsWith('-');
+    if (neg) str = str.slice(1);
+    const dot = str.split('.');
+    dot[0] = dot[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return (neg ? '-' : '') + dot.join('.');
+  }
+
+  function numStr(x){
+    let n = typeof x === 'number' ? x : parseFloat(x);
+    if (!isFinite(n)) return 'エラー';
+    n = Math.round(n * 1e8) / 1e8;
+    let s = String(n);
+    if (s.includes('e')) s = n.toFixed(0);
+    return s;
+  }
+
+  function isOp(s){ return s === '+' || s === '−' || s === '×' || s === '÷'; }
+
+  function applyOp(a, o, b){
+    switch (o) {
+      case '+': return a + b;
+      case '−': return a - b;
+      case '×': return a * b;
+      case '÷': return b === 0 ? NaN : a / b;
+    }
+    return b;
+  }
+
+  // ===== 描画 =====
+  function exprString(){
+    let e = parts.map(p => isOp(p) ? p : fmt(p)).join('');
+    if (typing) e += fmt(cur);
+    return e;
+  }
+
+  function update(){
+    // 上段：入力中の式（= 直後は確定した式を残す）
+    if (justEval) exprEl.textContent = lastExpr;
+    else if (parts.length) exprEl.textContent = exprString();
+    else exprEl.textContent = '';
+
+    // メイン：入力中の数字をそのまま表示（計算結果は = を押したときだけ）
+    const main = fmt(cur);
+    displayEl.textContent = main;
+    const len = main.length;
+    displayEl.style.fontSize = (len <= 7 ? 82 : Math.max(34, Math.floor(82 * 7 / len))) + 'px';
+
+    acBtn.textContent = (typing && cur !== '0') ? '⌫' : 'AC';
+    document.querySelectorAll('.key.op').forEach(b => {
+      b.classList.toggle('active', !typing && op === b.dataset.key);
+    });
+  }
+
+  // ===== マジック発動 =====
+  function activateMagic(){
+    const target = nowTarget();
+    let useOp = '+';
+    let need = target - acc;
+    if (op === '−' && acc - target > 0) { useOp = '−'; need = acc - target; }
+    if (need < 0) { useOp = '−'; need = acc - target; }
+    op = useOp;
+    if (parts.length && isOp(parts[parts.length - 1])) parts[parts.length - 1] = useOp;
+    forced = { digits: String(Math.round(need)), idx: 0 };
+  }
+
+  // ===== キー処理 =====
+  function pressDigit(d){
+    if (justEval) { justEval = false; lastExpr = ''; cur = '0'; typing = false; parts = []; committed = 0; acc = null; op = null; }
+    if (forced && op !== null) {
+      if (forced.idx >= forced.digits.length) return; // 打ち切り：それ以上は入力されない
+      d = forced.digits[forced.idx++];
+    }
+    if (!typing) {
+      cur = (d === '.') ? '0.' : d;
+      typing = true;
+    } else {
+      if (d === '.' && cur.includes('.')) return;
+      if (!forced && cur.replace(/[-.]/g, '').length >= 9) return; // 通常時は9桁まで
+      cur += d;
+    }
+    update();
+  }
+
+  function pressOp(o){
+    if (justEval) {
+      justEval = false;
+      lastExpr = '';
+      acc = parseFloat(cur);
+      parts = [numStr(cur)];
+      committed = 1;
+    } else if (typing) {
+      const v = parseFloat(cur);
+      acc = (acc === null || op === null) ? v : applyOp(acc, op, v);
+      parts.push(numStr(v));
+      committed++;
+      typing = false;
+      forced = forced && forced.idx > 0 ? null : forced;
+    } else if (acc === null) {
+      acc = parseFloat(cur);
+      parts = [numStr(cur)];
+      committed = 1;
+    }
+    op = o;
+    if (parts.length && isOp(parts[parts.length - 1])) parts[parts.length - 1] = o;
+    else parts.push(o);
+    if (committed >= MAGIC_AT && !forced) activateMagic();
+    update();
+  }
+
+  function pressEquals(){
+    if (op === null || acc === null || !typing) { update(); return; }
+    // マジック中に桁が残っていたら自動補完して必ずターゲットに合わせる
+    if (forced && forced.idx < forced.digits.length) {
+      cur = (forced.idx === 0 ? '' : cur) + forced.digits.slice(forced.idx);
+      forced.idx = forced.digits.length;
+    }
+    const v = parseFloat(cur);
+    const res = applyOp(acc, op, v);
+    parts.push(numStr(v));
+    lastExpr = parts.map(p => isOp(p) ? p : fmt(p)).join('') + '=';
+    cur = numStr(res);
+    acc = null; op = null; typing = false; committed = 0; forced = null; parts = [];
+    justEval = true;
+    update();
+  }
+
+  function pressAC(){
+    if (typing && cur !== '0') { // ⌫（1文字削除）
+      cur = cur.slice(0, -1);
+      if (forced && forced.idx > 0) forced.idx--;
+      if (cur === '' || cur === '-') { cur = '0'; typing = false; }
+    } else { // AC（全リセット）
+      acc = null; op = null; cur = '0'; typing = false;
+      committed = 0; forced = null; parts = []; justEval = false; lastExpr = '';
+    }
+    update();
+  }
+
+  function press(key){
+    if (key >= '0' && key <= '9' || key === '.') pressDigit(key);
+    else if (isOp(key)) pressOp(key);
+    else if (key === '=') pressEquals();
+    else if (key === 'ac') pressAC();
+    else if (key === 'pm') {
+      if (cur !== '0') { cur = cur.startsWith('-') ? cur.slice(1) : '-' + cur; update(); }
+    }
+    else if (key === 'pct') {
+      cur = numStr(parseFloat(cur) / 100); typing = true; update();
+    }
+  }
+
+  document.querySelectorAll('.key').forEach(b => {
+    if (b.dataset.key === 'none') return;
+    b.addEventListener('click', () => press(b.dataset.key));
+  });
+
+  // キーボード対応
+  document.addEventListener('keydown', e => {
+    const k = e.key;
+    if (k >= '0' && k <= '9') press(k);
+    else if (k === '.') press('.');
+    else if (k === '+') press('+');
+    else if (k === '-') press('−');
+    else if (k === '*') press('×');
+    else if (k === '/') { e.preventDefault(); press('÷'); }
+    else if (k === 'Enter' || k === '=') press('=');
+    else if (k === 'Backspace') press('ac');
+    else if (k === 'Escape') { typing = false; cur = '0'; press('ac'); }
+  });
+
+  // テスト用に公開
+  window.__press = press;
+  window.__nowTarget = nowTarget;
+
+  update();
+})();
+</script>
+</body>
+</html>
