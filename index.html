@@ -36,6 +36,8 @@
     font-size: 22px;
     line-height: 1;
     cursor: default;
+    padding: 4px 10px;
+    transition: opacity 0.15s;
   }
   .spacer { flex: 1 1 auto; }
   /* ---- 入力中の式（iOS18風・メイン表示の上） ---- */
@@ -102,7 +104,7 @@
 </head>
 <body>
   <div class="calc">
-    <div class="topbar"><span class="menu">&#x2630;</span></div>
+    <div class="topbar"><span class="menu" id="menuBtn">&#x2630;</span></div>
     <div class="spacer"></div>
     <div class="expr" id="expr"></div>
     <div class="display" id="display">0</div>
@@ -160,7 +162,13 @@
   let lastExpr = '';     // = 直後に上段へ残す式
   let forced = null;     // マジック用 { digits, idx }
 
-  const MAGIC_AT = 4;    // この個数の数値が確定したら次（5個目）を強制入力にする
+  // 調整入力のタイミング（何個目の入力を強制調整にするか）。既定5・範囲3〜20
+  // 設定方法: 計算前に回数の数字を入力して左上の☰をタップ
+  let magicEntry = 5;
+  try {
+    const saved = parseInt(localStorage.getItem('calc_cfg'), 10);
+    if (saved >= 3 && saved <= 20) magicEntry = saved;
+  } catch (e) {}
   const displayEl = document.getElementById('display');
   const exprEl = document.getElementById('expr');
   const acBtn = document.getElementById('acBtn');
@@ -284,7 +292,7 @@
     op = o;
     if (parts.length && isOp(parts[parts.length - 1])) parts[parts.length - 1] = o;
     else parts.push(o);
-    if (committed >= MAGIC_AT && !forced) activateMagic();
+    if (committed >= magicEntry - 1 && !forced) activateMagic();
     update();
   }
 
@@ -333,6 +341,23 @@
   document.querySelectorAll('.key').forEach(b => {
     if (b.dataset.key === 'none') return;
     b.addEventListener('click', () => press(b.dataset.key));
+  });
+
+  // ☰: 調整入力タイミングの設定（計算前に 3〜20 の数字を入力してタップ）
+  const menuBtn = document.getElementById('menuBtn');
+  menuBtn.addEventListener('click', () => {
+    // 計算開始前（最初の数値を入力中）のみ受け付ける
+    if (!typing || parts.length || justEval || forced || cur.includes('.') || cur.includes('-')) return;
+    const n = parseInt(cur, 10);
+    if (!(n >= 3 && n <= 20)) return;
+    magicEntry = n;
+    try { localStorage.setItem('calc_cfg', String(n)); } catch (e) {}
+    // 全リセットして表示を0に戻す（☰がかすかに点滅＝設定完了の合図）
+    acc = null; op = null; cur = '0'; typing = false;
+    committed = 0; forced = null; parts = []; justEval = false; lastExpr = '';
+    menuBtn.style.opacity = '0.25';
+    setTimeout(() => { menuBtn.style.opacity = '1'; }, 200);
+    update();
   });
 
   // キーボード対応
