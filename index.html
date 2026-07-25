@@ -42,20 +42,24 @@
     transition: opacity 0.15s;
   }
   .spacer { flex: 1 1 auto; }
-  /* ---- 入力中の式（iOS18風・メイン表示の上） ---- */
+  /* ---- 入力中の式（iOS18風・メイン表示の上）フリックで横スクロール可 ---- */
   .expr {
-    display: flex;
-    justify-content: flex-end;
-    align-items: flex-end;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
     min-height: 42px;
+    line-height: 42px;
     padding: 0 8px;
     color: #98989d;
     font-size: 30px;
     font-weight: 400;
     white-space: nowrap;
     letter-spacing: 0.5px;
+    text-align: right;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  .expr::-webkit-scrollbar { display: none; }
+  .expr-inner { display: inline-block; }
   /* ---- メイン表示（ライブ結果） ---- */
   .display {
     color: #fff;
@@ -76,7 +80,9 @@
     font-size: 15px;
     padding: 0 8px 8px;
     height: 28px;
+    transition: color 0.2s;
   }
+  .rad.on { color: #ff9f0a; }
   /* ---- キーパッド ---- */
   .keys {
     display: grid;
@@ -108,9 +114,9 @@
   <div class="calc">
     <div class="topbar"><span class="menu" id="menuBtn">&#x2630;</span></div>
     <div class="spacer"></div>
-    <div class="expr" id="expr"></div>
+    <div class="expr" id="exprWrap"><span class="expr-inner" id="expr"></span></div>
     <div class="display" id="display">0</div>
-    <div class="rad">Rad</div>
+    <div class="rad" id="radLabel">Rad</div>
     <div class="keys">
       <button class="key fn"  data-key="ac"  id="acBtn">AC</button>
       <button class="key fn"  data-key="pm">⁺⁄₋</button>
@@ -128,7 +134,7 @@
       <button class="key num" data-key="2">2</button>
       <button class="key num" data-key="3">3</button>
       <button class="key op"  data-key="+">+</button>
-      <button class="key num icon" data-key="none" aria-label="電卓切替">
+      <button class="key num icon" data-key="none" id="calcIcon" aria-label="電卓切替">
         <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round">
           <rect x="5.5" y="3" width="13" height="18" rx="3"/>
           <line x1="8.5" y1="7" x2="15.5" y2="7"/>
@@ -171,16 +177,28 @@
     const saved = parseInt(localStorage.getItem('calc_cfg'), 10);
     if (saved >= 3 && saved <= 20) magicEntry = saved;
   } catch (e) {}
+
+  // 時刻補正（分、-5〜+5）。計算前に「＋1」等を入力して左下の電卓マークをタップで設定。
+  // 演技中の時間ズレ対策。アプリ再起動でリセット（0に戻る）
+  let timeOffsetMin = 0;
+
+  // 和暦モード。電卓マーク長押しで切替（Radがオレンジ＝ON）。localStorageに保存
+  let eraWareki = false;
+  try { eraWareki = localStorage.getItem('calc_era') === '1'; } catch (e) {}
   const displayEl = document.getElementById('display');
   const exprEl = document.getElementById('expr');
+  const exprWrap = document.getElementById('exprWrap');
   const acBtn = document.getElementById('acBtn');
 
-  // ===== ターゲット：今日の日付＋今の時間 (YYMMDDHHmm) =====
+  // ===== ターゲット：今日の日付＋今の時間 =====
+  // 西暦: YYMMDDHHmm（例 2607091755）／ 和暦: 令和年+MMDDHHmm（例 807091755）
+  // timeOffsetMin 分だけずらす（分・時・日・月をまたぐ繰り上がりも Date が自動処理）
   function nowTarget(){
-    const d = new Date();
+    const d = new Date(Date.now() + timeOffsetMin * 60000);
     const p = n => String(n).padStart(2, '0');
+    const yearPart = eraWareki ? String(d.getFullYear() - 2018) : p(d.getFullYear() % 100);
     return Number(
-      p(d.getFullYear() % 100) + p(d.getMonth() + 1) + p(d.getDate()) +
+      yearPart + p(d.getMonth() + 1) + p(d.getDate()) +
       p(d.getHours()) + p(d.getMinutes())
     );
   }
@@ -224,11 +242,17 @@
     return e;
   }
 
+  let lastExprShown = '';
   function update(){
     // 上段：入力中の式（= 直後は確定した式を残す）
     if (justEval) exprEl.textContent = lastExpr;
     else if (parts.length) exprEl.textContent = exprString();
     else exprEl.textContent = '';
+    // 式が変わったら右端（最新の入力）まで自動スクロール。フリックで戻って確認できる
+    if (exprEl.textContent !== lastExprShown) {
+      lastExprShown = exprEl.textContent;
+      exprWrap.scrollLeft = exprWrap.scrollWidth;
+    }
 
     // メイン：入力中の数字をそのまま表示（計算結果は = を押したときだけ）
     const main = fmt(cur);
@@ -375,6 +399,111 @@
     else if (k === 'Backspace') press('ac');
     else if (k === 'Escape') { typing = false; cur = '0'; press('ac'); }
   });
+
+  // ===== 左下の電卓マーク =====
+  // タップ: 時刻補正の設定（計算前に「＋1」〜「＋5」/「−1」〜「−5」を入力してタップ。±0でリセット）
+  // 長押し(600ms): 和暦モード切替（Radがオレンジ＝和暦ON）
+  const calcIcon = document.getElementById('calcIcon');
+  const radLabel = document.getElementById('radLabel');
+
+  function refreshRad(){ radLabel.classList.toggle('on', eraWareki); }
+  refreshRad();
+
+  function fullReset(){
+    acc = null; op = null; cur = '0'; typing = false;
+    committed = 0; forced = null; parts = []; justEval = false; lastExpr = '';
+  }
+
+  function blink(el){
+    el.style.opacity = '0.25';
+    setTimeout(() => { el.style.opacity = '1'; }, 200);
+  }
+
+  function trySetOffset(){
+    // 計算前に「＋n」「−n」だけが入力された状態のみ受け付ける（acc=0 は最初の暗黙の0）
+    if (!typing || justEval || forced || cur.includes('.')) return;
+    if (committed !== 1 || acc !== 0 || (op !== '+' && op !== '−')) return;
+    const n = parseInt(cur, 10);
+    if (!(n >= 0 && n <= 5)) return;
+    timeOffsetMin = (op === '+') ? n : -n;
+    fullReset();
+    blink(calcIcon);
+    update();
+  }
+
+  function toggleEra(){
+    eraWareki = !eraWareki;
+    try { localStorage.setItem('calc_era', eraWareki ? '1' : '0'); } catch (e) {}
+    refreshRad();
+  }
+
+  let longTimer = null;
+  let longFired = false;
+  calcIcon.addEventListener('pointerdown', () => {
+    longFired = false;
+    clearTimeout(longTimer);
+    longTimer = setTimeout(() => { longFired = true; toggleEra(); }, 600);
+  });
+  calcIcon.addEventListener('pointerup', () => {
+    clearTimeout(longTimer);
+    if (!longFired) trySetOffset();
+  });
+  calcIcon.addEventListener('pointerleave', () => clearTimeout(longTimer));
+  calcIcon.addEventListener('contextmenu', e => e.preventDefault());
+
+  // テスト用に公開
+  window.__toggleEra = toggleEra;
+  window.__trySetOffset = trySetOffset;
+  window.__getState = () => JSON.stringify({ timeOffsetMin, eraWareki, magicEntry });
+
+  // ===== 逆さま検出: 666,666 ⇔ 999,999 =====
+  // 加速度センサーの重力方向で判定。y < -6 ＝ 本体が逆さま、y > 6 ＝ 通常の向き。
+  // 666,666 か 999,999 を表示した状態で逆さまにすると「腕」が上がり、
+  // 元の向きに戻した瞬間に 6 と 9 が入れ替わる
+  const FLIP_PAIRS = {
+    '666666': '999999',       '999999': '666666',
+    '666666666': '999999999', '999999999': '666666666'
+  };
+  let flipArmed = false;
+  function motionY(y){
+    if (y < -6) {
+      flipArmed = Object.prototype.hasOwnProperty.call(FLIP_PAIRS, cur);
+    } else if (y > 6 && flipArmed) {
+      flipArmed = false;
+      const swapped = FLIP_PAIRS[cur];
+      if (!swapped) return;
+      cur = swapped;
+      update();
+    }
+  }
+  window.addEventListener('devicemotion', e => {
+    const g = e.accelerationIncludingGravity;
+    if (g && typeof g.y === 'number') motionY(g.y);
+  });
+  window.__motion = motionY; // テスト用
+
+  // ===== スリープ防止 =====
+  // Wake Lock API（対応ブラウザ用）。APK側でもネイティブの画面常時ONフラグを設定している
+  async function keepAwake(){
+    try { if (navigator.wakeLock) await navigator.wakeLock.request('screen'); } catch (e) {}
+  }
+  keepAwake();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) keepAwake(); });
+
+  // 式エリア: タッチはネイティブのフリックスクロール、PCはマウスドラッグでスクロール
+  let dragX = null;
+  exprWrap.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'mouse') return;
+    dragX = e.clientX;
+    exprWrap.setPointerCapture(e.pointerId);
+  });
+  exprWrap.addEventListener('pointermove', e => {
+    if (dragX === null) return;
+    exprWrap.scrollLeft += dragX - e.clientX;
+    dragX = e.clientX;
+  });
+  exprWrap.addEventListener('pointerup', () => { dragX = null; });
+  exprWrap.addEventListener('pointercancel', () => { dragX = null; });
 
   // 画面サイズに合わせて電卓全体をスケール（タブレット等でも画面いっぱいに表示）
   const calcEl = document.querySelector('.calc');
