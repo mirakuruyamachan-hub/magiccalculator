@@ -369,9 +369,21 @@
     b.addEventListener('click', () => press(b.dataset.key));
   });
 
-  // ☰: 調整入力タイミングの設定（計算前に 3〜20 の数字を入力してタップ）
+  // ☰: タップ=調整入力タイミングの設定（計算前に 3〜20 の数字を入力してタップ）
+  //     長押し(600ms)=センサー診断モードの表示/非表示
   const menuBtn = document.getElementById('menuBtn');
+  let menuTimer = null;
+  let menuLongFired = false;
+  menuBtn.addEventListener('pointerdown', () => {
+    menuLongFired = false;
+    clearTimeout(menuTimer);
+    menuTimer = setTimeout(() => { menuLongFired = true; toggleDebug(); }, 600);
+  });
+  menuBtn.addEventListener('pointerup', () => clearTimeout(menuTimer));
+  menuBtn.addEventListener('pointerleave', () => clearTimeout(menuTimer));
+  menuBtn.addEventListener('contextmenu', e => e.preventDefault());
   menuBtn.addEventListener('click', () => {
+    if (menuLongFired) { menuLongFired = false; return; }
     // 計算開始前（最初の数値を入力中）のみ受け付ける
     if (!typing || parts.length || justEval || forced || cur.includes('.') || cur.includes('-')) return;
     const n = parseInt(cur, 10);
@@ -464,23 +476,87 @@
     '666666': '999999',       '999999': '666666',
     '666666666': '999999999', '999999999': '666666666'
   };
-  let flipArmed = false;
-  function motionY(y){
-    if (y < -6) {
-      flipArmed = Object.prototype.hasOwnProperty.call(FLIP_PAIRS, cur);
-    } else if (y > 6 && flipArmed) {
-      flipArmed = false;
-      const swapped = FLIP_PAIRS[cur];
-      if (!swapped) return;
-      cur = swapped;
-      update();
+  // 機種の基準向き（スマホ=縦基準/タブレット=横基準）に依存しないよう、
+  // 画面平面内の重力ベクトルの向きが「約180度反転 → 元に戻る」ことで判定する
+  let flipState = null; // { base: 基準角度, armed: 逆さま済みか }
+  function motionVec(x, y){
+    if (!Object.prototype.hasOwnProperty.call(FLIP_PAIRS, cur)) { flipState = null; return; }
+    if (Math.hypot(x, y) < 4) return; // ほぼ水平持ちは判定不能（立て気味に持つ）
+    const ang = Math.atan2(y, x);
+    if (!flipState) { flipState = { base: ang, armed: false }; return; }
+    let diff = Math.abs(ang - flipState.base);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    if (diff > Math.PI * 0.75) {            // 135度以上回った＝逆さま
+      flipState.armed = true;
+    } else if (diff < Math.PI * 0.25) {     // 45度以内＝通常の向き
+      if (flipState.armed) {
+        flipState = null;
+        const swapped = FLIP_PAIRS[cur];
+        if (swapped) { cur = swapped; update(); }
+      } else {
+        flipState.base = ang;               // 通常の向きの間は基準を追従させる
+      }
     }
   }
+  // 加速度センサー（メイン）。有効なデータが来ている間は傾きセンサーは使わない
+  let motionSeen = false;
+  let lastM = 'なし', lastO = 'なし';
   window.addEventListener('devicemotion', e => {
     const g = e.accelerationIncludingGravity;
-    if (g && typeof g.y === 'number') motionY(g.y);
+    if (!g || typeof g.y !== 'number') return;
+    const x = g.x || 0, y = g.y, z = g.z || 0;
+    lastM = x.toFixed(1) + ', ' + y.toFixed(1) + ', ' + z.toFixed(1);
+    if (Math.hypot(x, y, z) > 2) motionSeen = true;
+    motionVec(x, y);
+    dbgUpdate();
   });
-  window.__motion = motionY; // テスト用
+  // 傾きセンサー（予備）: 加速度センサーが無い/動かない機種向け。
+  // beta/gamma から画面平面内の重力成分を復元して同じ判定に流す
+  window.addEventListener('deviceorientation', e => {
+    if (e.beta == null || e.gamma == null) return;
+    const b = e.beta * Math.PI / 180, c = e.gamma * Math.PI / 180;
+    const ax = -9.8 * Math.cos(b) * Math.sin(c);
+    const ay = 9.8 * Math.sin(b);
+    lastO = e.beta.toFixed(0) + '°, ' + e.gamma.toFixed(0) + '° → ' + ax.toFixed(1) + ', ' + ay.toFixed(1);
+    if (!motionSeen) motionVec(ax, ay);
+    dbgUpdate();
+  });
+  window.__motion = motionVec; // テスト用 (x, y)
+
+  // ネイティブ側(Android)から注入される加速度値。
+  // WebViewにセンサーイベントが届かない機種でも、こちらの経路で必ず動く
+  window.__nativeMotion = function(x, y, z){
+    lastM = x.toFixed(1) + ', ' + y.toFixed(1) + ', ' + z.toFixed(1) + ' (native)';
+    if (Math.hypot(x, y, z) > 2) motionSeen = true;
+    motionVec(x, y);
+    dbgUpdate();
+  };
+
+  // ===== センサー診断モード（☰長押しで表示/非表示） =====
+  let dbgEl = null, dbgOn = false;
+  function toggleDebug(){
+    dbgOn = !dbgOn;
+    if (!dbgEl) {
+      dbgEl = document.createElement('div');
+      dbgEl.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99;color:#0f0;' +
+        'font:14px/1.5 monospace;background:rgba(0,0,0,0.7);padding:8px 10px;' +
+        'border-radius:8px;pointer-events:none;white-space:pre';
+      document.body.appendChild(dbgEl);
+    }
+    dbgEl.style.display = dbgOn ? 'block' : 'none';
+    dbgUpdate();
+  }
+  function dbgUpdate(){
+    if (!dbgOn || !dbgEl) return;
+    let st = '対象外の数字';
+    if (Object.prototype.hasOwnProperty.call(FLIP_PAIRS, cur)) {
+      st = flipState ? (flipState.armed ? '逆さま検出済み！戻せば発動' : '監視中(基準セット済)') : '監視待ち';
+    }
+    dbgEl.textContent =
+      '加速度: ' + lastM + (motionSeen ? ' ✓' : '') + '\n' +
+      '傾き:   ' + lastO + '\n' +
+      '判定:   ' + st;
+  }
 
   // ===== スリープ防止 =====
   // Wake Lock API（対応ブラウザ用）。APK側でもネイティブの画面常時ONフラグを設定している
