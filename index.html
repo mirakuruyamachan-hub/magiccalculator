@@ -530,6 +530,38 @@
   });
   window.__motion = motionVec; // テスト用 (x, y)
 
+  // ===== iOS(Safari)のセンサー許可 =====
+  // iOS13以降は「モーションと画面の向きへのアクセス」をユーザー操作から明示的に
+  // リクエストしないと devicemotion/deviceorientation が一切発火しない。
+  // 画面のどこか最初の1タップ（=普段どおりキーを押すだけ）でリクエストする。
+  let motionPermState = '不要（このOSでは常に有効）';
+  function needsIOSPermission(){
+    return (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
+  }
+  if (needsIOSPermission()) motionPermState = '未許可（画面をタップすると許可を求められます）';
+  function requestMotionPermissionOnce(){
+    const reqs = [];
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      reqs.push(DeviceMotionEvent.requestPermission().then(r => ({ kind: 'motion', r })));
+    }
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      reqs.push(DeviceOrientationEvent.requestPermission().then(r => ({ kind: 'orientation', r })));
+    }
+    if (!reqs.length) return;
+    Promise.all(reqs).then(results => {
+      const denied = results.some(x => x.r !== 'granted');
+      motionPermState = denied ? '拒否されました（設定アプリ→Safari→モーションと向きで許可可能）' : '許可されました';
+      dbgUpdate();
+    }).catch(() => {
+      motionPermState = 'リクエスト失敗';
+      dbgUpdate();
+    });
+  }
+  if (needsIOSPermission()) {
+    document.addEventListener('pointerdown', requestMotionPermissionOnce, { once: true });
+  }
+  window.__requestMotionPermission = requestMotionPermissionOnce; // テスト用
+
   // ネイティブ側(Android)から注入される加速度値。
   // WebViewにセンサーイベントが届かない機種でも、こちらの経路で必ず動く
   window.__nativeMotion = function(x, y, z){
@@ -560,6 +592,7 @@
       st = flipState ? (flipState.armed ? '逆さま検出済み！戻せば発動' : '監視中(基準セット済)') : '監視待ち';
     }
     dbgEl.textContent =
+      'iOS許可: ' + motionPermState + '\n' +
       '加速度: ' + lastM + (motionSeen ? ' ✓' : '') + '\n' +
       '傾き:   ' + lastO + '\n' +
       '判定:   ' + st;
