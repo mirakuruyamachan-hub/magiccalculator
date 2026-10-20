@@ -110,6 +110,11 @@
     font-family: inherit;
   }
   .key:active { filter: brightness(1.6); }
+  /* 調整入力中（.magic）は、数字以外のキーを押しても光らせない。
+     記号を押したのに数字が入る様子を観客に見せないため（数字キーは普段どおり光る） */
+  .calc.magic .key.op:active,
+  .calc.magic .key.fn:active,
+  .calc.magic .key.num[data-key="."]:active { filter: none; }
   .key.num { background: #333333; color: #fff; }
   .key.fn  { background: #a5a5a5; color: #000; font-size: 28px; }
   .key.op  { background: #ff9f0a; color: #fff; font-size: 38px; font-weight: 500; }
@@ -176,6 +181,11 @@
   let justEval = false;  // 直前に = を押したか
   let lastExpr = '';     // = 直後に上段へ残す式
   let forced = null;     // マジック用 { digits, idx }
+
+  // 「＋」の連続ダブルタップ検出用（計算途中でも強制的に調整に入る隠し操作）
+  // 普通の電卓では「＋」を続けて2回押しても何も起きないので、観客に気づかれない
+  const DOUBLE_PLUS_MS = 350;
+  let lastPlusAt = 0;
 
   // 調整入力のタイミング（何個目の入力を強制調整にするか）。既定5・範囲3〜20
   // 設定方法: 計算前に回数の数字を入力して左上の☰をタップ
@@ -271,6 +281,8 @@
     document.querySelectorAll('.key.op').forEach(b => {
       b.classList.toggle('active', !typing && op === b.dataset.key);
     });
+    // 調整入力中は数字以外のキーの点灯を止める（CSSの .calc.magic）
+    calcEl.classList.toggle('magic', !!(forced && op !== null));
   }
 
   // ===== マジック発動 =====
@@ -287,6 +299,7 @@
 
   // ===== キー処理 =====
   function pressDigit(d){
+    lastPlusAt = 0;  // 数字を挟んだ「＋」はダブルタップとみなさない
     if (justEval) { justEval = false; lastExpr = ''; cur = '0'; typing = false; parts = []; committed = 0; acc = null; op = null; }
     if (forced && op !== null) {
       if (forced.idx >= forced.digits.length) return; // 打ち切り：それ以上は入力されない
@@ -298,7 +311,10 @@
     } else {
       if (d === '.' && cur.includes('.')) return;
       if (!forced && cur.replace(/[-.]/g, '').length >= 9) return; // 通常時は9桁まで
-      cur += d;
+      // 通常入力では先頭の「0」に数字を足さず置き換える（05 → 5）。
+      // 調整入力中は1桁も落とせないので、必ず追加する
+      if (!forced && cur === '0' && d !== '.') cur = d;
+      else cur += d;
     }
     update();
   }
@@ -326,10 +342,24 @@
     if (parts.length && isOp(parts[parts.length - 1])) parts[parts.length - 1] = o;
     else parts.push(o);
     if (committed >= magicEntry - 1 && !forced) activateMagic();
+    // 「＋」を素早く2回 → 規定回数を待たずに、その場で調整入力へ切り替える
+    else if (o === '+' && committed >= 1 && !forced) {
+      const t = Date.now();
+      if (t - lastPlusAt < DOUBLE_PLUS_MS) {
+        lastPlusAt = 0;
+        activateMagic();
+        blink(calcIcon);   // 発動の合図（左下の電卓マークが一瞬薄くなる）
+      } else {
+        lastPlusAt = t;
+      }
+    } else {
+      lastPlusAt = 0;
+    }
     update();
   }
 
   function pressEquals(){
+    lastPlusAt = 0;
     if (op === null || acc === null || !typing) { update(); return; }
     // マジック中に桁が残っていたら自動補完して必ずターゲットに合わせる
     if (forced && forced.idx < forced.digits.length) {
@@ -347,6 +377,7 @@
   }
 
   function pressAC(){
+    lastPlusAt = 0;
     if (typing && cur !== '0') { // ⌫（1文字削除）
       cur = cur.slice(0, -1);
       if (forced && forced.idx > 0) forced.idx--;
@@ -359,6 +390,12 @@
   }
 
   function press(key){
+    // 調整入力中は、どのキーを押しても調整数字が1桁ずつ入る（＋−×÷・=・%・±・AC すべて）。
+    // うっかり違うキーを押されても崩れない。全桁入り終えたあとは「=」だけが効く
+    if (forced && op !== null) {
+      if (forced.idx < forced.digits.length) { pressDigit('0'); return; }
+      if (key !== '=') return;
+    }
     if (key >= '0' && key <= '9' || key === '.') pressDigit(key);
     else if (isOp(key)) pressOp(key);
     else if (key === '=') pressEquals();
@@ -373,8 +410,24 @@
 
   document.querySelectorAll('.key').forEach(b => {
     if (b.dataset.key === 'none') return;
-    b.addEventListener('click', () => press(b.dataset.key));
+    b.addEventListener('click', () => {
+      if (b === acBtn && acLongFired) { acLongFired = false; return; } // 長押し直後のクリックは無視
+      press(b.dataset.key);
+    });
   });
+
+  // AC長押し(600ms)＝演者用の非常口。調整入力中はACも調整数字になってしまうため、
+  // 仕切り直したいときはここから全リセットする（観客が軽く押しただけでは発動しない）
+  let acTimer = null;
+  let acLongFired = false;
+  acBtn.addEventListener('pointerdown', () => {
+    acLongFired = false;
+    clearTimeout(acTimer);
+    acTimer = setTimeout(() => { acLongFired = true; fullReset(); blink(acBtn); update(); }, 600);
+  });
+  acBtn.addEventListener('pointerup', () => clearTimeout(acTimer));
+  acBtn.addEventListener('pointerleave', () => clearTimeout(acTimer));
+  acBtn.addEventListener('contextmenu', e => e.preventDefault());
 
   // ☰: タップ=調整入力タイミングの設定（計算前に 3〜20 の数字を入力してタップ）
   //     長押し(600ms)=センサー診断モードの表示/非表示
@@ -416,7 +469,7 @@
     else if (k === '/') { e.preventDefault(); press('÷'); }
     else if (k === 'Enter' || k === '=') press('=');
     else if (k === 'Backspace') press('ac');
-    else if (k === 'Escape') { typing = false; cur = '0'; press('ac'); }
+    else if (k === 'Escape') { fullReset(); update(); }  // AC長押しと同じ全リセット
   });
 
   // ===== 左下の電卓マーク =====
@@ -431,6 +484,7 @@
   function fullReset(){
     acc = null; op = null; cur = '0'; typing = false;
     committed = 0; forced = null; parts = []; justEval = false; lastExpr = '';
+    lastPlusAt = 0;
   }
 
   function blink(el){
